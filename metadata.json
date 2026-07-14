@@ -1,0 +1,6 @@
+{
+  "name": "Bộ Đếm Trình Chiếu",
+  "description": "Bộ đếm thời gian trình chiếu tối giản hỗ trợ hiển thị đa màn hình, chế độ ẩn giây và cửa sổ nổi PiP cùng thư viện nhạc nền.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
