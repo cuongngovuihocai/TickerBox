@@ -116,6 +116,7 @@ export default function PresenterControls({
 
   // Audio Preview Handling (Hover or Click)
   const handlePreviewTrack = (trackId: string) => {
+    if (previewTrackId === trackId) return;
     setPreviewTrackId(trackId);
     if (trackId === 'none') {
       synthEngine.stop();
@@ -512,7 +513,12 @@ export default function PresenterControls({
             <div className="relative flex-1 min-w-[220px]" ref={musicDropdownRef}>
               <button
                 type="button"
-                onClick={() => setIsMusicOpen(!isMusicOpen)}
+                onClick={() => {
+                  if (isMusicOpen) {
+                    handleStopPreview();
+                  }
+                  setIsMusicOpen(!isMusicOpen);
+                }}
                 className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-[#09090A] hover:bg-[#141416] border border-[#2A2A2C] hover:border-[#D4AF37]/50 rounded-xl text-xs transition-all cursor-pointer"
               >
                 <div className="flex items-center gap-2 truncate">
@@ -526,7 +532,10 @@ export default function PresenterControls({
 
               {/* Music Dropdown Menu */}
               {isMusicOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1.5 z-50 bg-[#121214] border border-[#2A2A2C] rounded-xl shadow-2xl p-1.5 flex flex-col gap-1 backdrop-blur-xl animate-fadeIn">
+                <div 
+                  onMouseLeave={handleStopPreview}
+                  className="absolute top-full left-0 right-0 mt-1.5 z-50 bg-[#121214] border border-[#2A2A2C] rounded-xl shadow-2xl p-1.5 flex flex-col gap-1 backdrop-blur-xl animate-fadeIn"
+                >
                   <div className="px-2 py-1 text-[10px] uppercase font-bold text-[#D4AF37]/80 tracking-wider border-b border-[#2A2A2C]/60 mb-0.5 flex justify-between items-center">
                     <span>Chọn bản nhạc nền</span>
                     <span className="text-[9px] text-[#E0D8D0]/50 lowercase font-normal italic">
@@ -541,7 +550,6 @@ export default function PresenterControls({
                       <div
                         key={track.id}
                         onMouseEnter={() => handlePreviewTrack(track.id)}
-                        onMouseLeave={handleStopPreview}
                         onClick={() => handleSelectTrack(track.id)}
                         className={`flex items-center justify-between p-2 rounded-lg text-xs transition-all cursor-pointer ${
                           isSelected

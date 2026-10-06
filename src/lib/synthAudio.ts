@@ -1,19 +1,22 @@
 /**
  * Web Audio API Synthesizer Engine for offline-capable, royalty-free presentation background music.
+ * Features isolated trackGain channels, comprehensive source tracking, and leak-proof teardown.
  */
 
 class SynthEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
+  private trackGain: GainNode | null = null;
   private activeSources: { node: AudioNode; stop?: () => void }[] = [];
   private activeIntervals: number[] = [];
+  private activeTimeouts: number[] = [];
   private currentVolume: number = 0.5;
   private currentType: 'ambient' | 'rain' | 'metronome' | 'stream' | 'energetic' | null = null;
   private isRunning: boolean = false;
   private chordIndex: number = 0;
 
   constructor() {
-    // Lazy loaded to avoid browser block
+    // Lazy loaded to avoid browser autoplay policy blocks
   }
 
   private initCtx() {
@@ -36,17 +39,23 @@ class SynthEngine {
   public setVolume(volume: number) {
     this.currentVolume = volume;
     if (this.masterGain && this.ctx) {
-      this.masterGain.gain.linearRampToValueAtTime(volume, this.ctx.currentTime + 0.1);
+      this.masterGain.gain.linearRampToValueAtTime(volume, this.ctx.currentTime + 0.05);
     }
   }
 
   public start(type: 'ambient' | 'rain' | 'metronome' | 'stream' | 'energetic') {
+    // Ensure 100% clean teardown of previous track before starting new track
     this.stop();
     this.initCtx();
     if (!this.ctx || !this.masterGain) return;
 
     this.currentType = type;
     this.isRunning = true;
+
+    // Create an isolated sub-bus for this specific playback instance
+    this.trackGain = this.ctx.createGain();
+    this.trackGain.gain.setValueAtTime(1.0, this.ctx.currentTime);
+    this.trackGain.connect(this.masterGain);
 
     if (type === 'ambient') {
       this.startAmbient();
@@ -65,26 +74,43 @@ class SynthEngine {
     this.isRunning = false;
     this.currentType = null;
 
-    // Stop and disconnect all active sources
-    this.activeSources.forEach((src) => {
-      try {
-        if (src.stop) {
-          src.stop();
-        } else if ((src.node as any).stop) {
-          (src.node as any).stop();
-        }
-        src.node.disconnect();
-      } catch (e) {
-        // Already stopped
-      }
-    });
-    this.activeSources = [];
-
-    // Clear all intervals
+    // 1. Clear all recurring timers and scheduled timeouts
     this.activeIntervals.forEach((intervalId) => {
       window.clearInterval(intervalId);
     });
     this.activeIntervals = [];
+
+    this.activeTimeouts.forEach((timeoutId) => {
+      window.clearTimeout(timeoutId);
+    });
+    this.activeTimeouts = [];
+
+    // 2. Immediately sever track sub-bus to guarantee ZERO sound leakage
+    if (this.trackGain && this.ctx) {
+      try {
+        this.trackGain.gain.setValueAtTime(0, this.ctx.currentTime);
+        this.trackGain.disconnect();
+      } catch (e) {}
+      this.trackGain = null;
+    }
+
+    // 3. Stop and disconnect every active oscillator, buffer source, and LFO
+    this.activeSources.forEach((src) => {
+      try {
+        if (src.stop) {
+          src.stop();
+        }
+      } catch (e) {}
+      try {
+        if ((src.node as any).stop) {
+          (src.node as any).stop();
+        }
+      } catch (e) {}
+      try {
+        src.node.disconnect();
+      } catch (e) {}
+    });
+    this.activeSources = [];
   }
 
   public getActiveTrack(): 'ambient' | 'rain' | 'metronome' | 'stream' | 'energetic' | null {
@@ -93,9 +119,9 @@ class SynthEngine {
 
   // --- Track 1: Space Ambient Drone (Warm Pads & Moving Chords) ---
   private startAmbient() {
-    if (!this.ctx || !this.masterGain) return;
+    if (!this.ctx || !this.trackGain) return;
     const ctx = this.ctx;
-    const master = this.masterGain;
+    const outNode = this.trackGain;
 
     // Warm chords: Cmaj9, Fmaj9, Am9, G6
     const chords = [
@@ -108,15 +134,13 @@ class SynthEngine {
     this.chordIndex = 0;
 
     const playChord = () => {
-      if (!this.isRunning || !this.ctx || !this.masterGain) return;
+      if (!this.isRunning || !this.ctx || !this.trackGain) return;
       const now = ctx.currentTime;
       const currentChord = chords[this.chordIndex];
       this.chordIndex = (this.chordIndex + 1) % chords.length;
 
       // Trigger standard warm sine/triangle voices with slow fade-in and fade-out
       const duration = 7.5; // 7.5 seconds per chord, with overlap
-      const voices: OscillatorNode[] = [];
-      const gains: GainNode[] = [];
 
       currentChord.forEach((freq, idx) => {
         const osc = ctx.createOscillator();
@@ -141,29 +165,23 @@ class SynthEngine {
 
         osc.connect(gain);
         gain.connect(filter);
-        filter.connect(master);
+        filter.connect(outNode);
 
         osc.start(now);
-        osc.stop(now + duration);
-
-        voices.push(osc);
-        gains.push(gain);
+        try {
+          osc.stop(now + duration);
+        } catch (e) {}
 
         this.activeSources.push({
           node: osc,
           stop: () => {
             try { osc.stop(); } catch(e){}
+            try { osc.disconnect(); } catch(e){}
+            try { gain.disconnect(); } catch(e){}
+            try { filter.disconnect(); } catch(e){}
           }
         });
       });
-
-      // Periodic garbage collection of stopped voices from activeSources
-      setTimeout(() => {
-        this.activeSources = this.activeSources.filter(src => {
-          const isFinished = (src.node as any).playbackState === 3 || ctx.currentTime > now + duration;
-          return !isFinished;
-        });
-      }, duration * 1000 + 100);
     };
 
     // Play first chord immediately
@@ -174,11 +192,11 @@ class SynthEngine {
     this.activeIntervals.push(interval);
   }
 
-  // --- Track 2: White Noise Rain with Wind LFO ---
+  // --- Track 2: White Noise Rain with Wind LFO (Tiếng Mưa Tĩnh Lặng) ---
   private startRain() {
-    if (!this.ctx || !this.masterGain) return;
+    if (!this.ctx || !this.trackGain) return;
     const ctx = this.ctx;
-    const master = this.masterGain;
+    const outNode = this.trackGain;
 
     // 1. Generate a white noise buffer
     const bufferSize = ctx.sampleRate * 2; // 2 seconds
@@ -220,11 +238,11 @@ class SynthEngine {
     lfo.connect(lfoGain);
     lfoGain.connect(rainGain.gain);
 
-    // Connect noise to master
+    // Connect noise to isolated track bus
     noiseNode.connect(biquadFilter);
     biquadFilter.connect(lowpass);
     lowpass.connect(rainGain);
-    rainGain.connect(master);
+    rainGain.connect(outNode);
 
     noiseNode.start(0);
     lfo.start(0);
@@ -233,13 +251,16 @@ class SynthEngine {
       node: noiseNode,
       stop: () => {
         try { noiseNode.stop(); } catch(e){}
+        try { noiseNode.disconnect(); } catch(e){}
         try { lfo.stop(); } catch(e){}
+        try { lfo.disconnect(); } catch(e){}
+        try { rainGain.disconnect(); } catch(e){}
       }
     });
 
     // Generate random soft droplets periodically
     const triggerDroplet = () => {
-      if (!this.isRunning || !this.ctx || !this.masterGain) return;
+      if (!this.isRunning || !this.ctx || !this.trackGain) return;
       const now = ctx.currentTime;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -255,14 +276,24 @@ class SynthEngine {
       gain.gain.exponentialRampToValueAtTime(0.00001, now + 0.08);
 
       osc.connect(gain);
-      gain.connect(master);
+      gain.connect(outNode);
 
       osc.start(now);
-      osc.stop(now + 0.1);
+      try {
+        osc.stop(now + 0.1);
+      } catch (e) {}
+
+      this.activeSources.push({
+        node: osc,
+        stop: () => {
+          try { osc.stop(); } catch(e){}
+          try { osc.disconnect(); } catch(e){}
+          try { gain.disconnect(); } catch(e){}
+        }
+      });
     };
 
     const dropInterval = window.setInterval(() => {
-      // Trigger droplet randomly
       if (Math.random() > 0.3) {
         triggerDroplet();
       }
@@ -272,9 +303,9 @@ class SynthEngine {
 
   // --- Track 3: Water Stream & Singing Birds (Suối chảy & Chim hót) ---
   private startStream() {
-    if (!this.ctx || !this.masterGain) return;
+    if (!this.ctx || !this.trackGain) return;
     const ctx = this.ctx;
-    const master = this.masterGain;
+    const outNode = this.trackGain;
 
     // 1. Water stream flow (Gentle bandpassed noise + LFO)
     const bufferSize = ctx.sampleRate * 2; // 2 seconds
@@ -301,7 +332,7 @@ class SynthEngine {
     const streamGain = ctx.createGain();
     streamGain.gain.setValueAtTime(0.09, ctx.currentTime);
 
-    // Flow modulation LFO for water waves
+    // Flow modulation LFO for gentle water waves
     const lfo = ctx.createOscillator();
     lfo.type = 'sine';
     lfo.frequency.setValueAtTime(0.25, ctx.currentTime); // 0.25 Hz
@@ -315,7 +346,7 @@ class SynthEngine {
     streamSource.connect(bandpass);
     bandpass.connect(lowpass);
     lowpass.connect(streamGain);
-    streamGain.connect(master);
+    streamGain.connect(outNode);
 
     streamSource.start(0);
     lfo.start(0);
@@ -324,13 +355,16 @@ class SynthEngine {
       node: streamSource,
       stop: () => {
         try { streamSource.stop(); } catch(e){}
+        try { streamSource.disconnect(); } catch(e){}
         try { lfo.stop(); } catch(e){}
+        try { lfo.disconnect(); } catch(e){}
+        try { streamGain.disconnect(); } catch(e){}
       }
     });
 
     // 2. Water trickling / bubbling sounds
     const playBubble = () => {
-      if (!this.isRunning || !this.ctx || !this.masterGain) return;
+      if (!this.isRunning || !this.ctx || !this.trackGain) return;
       const now = ctx.currentTime;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -338,7 +372,6 @@ class SynthEngine {
       osc.type = 'sine';
       const baseFreq = 300 + Math.random() * 350;
       osc.frequency.setValueAtTime(baseFreq, now);
-      // Extremely fast upward sweep creates a cute bubbling / splash sound
       osc.frequency.exponentialRampToValueAtTime(baseFreq * 1.8, now + 0.05);
 
       gain.gain.setValueAtTime(0, now);
@@ -346,10 +379,21 @@ class SynthEngine {
       gain.gain.exponentialRampToValueAtTime(0.00001, now + 0.05);
 
       osc.connect(gain);
-      gain.connect(master);
+      gain.connect(outNode);
 
       osc.start(now);
-      osc.stop(now + 0.06);
+      try {
+        osc.stop(now + 0.06);
+      } catch (e) {}
+
+      this.activeSources.push({
+        node: osc,
+        stop: () => {
+          try { osc.stop(); } catch(e){}
+          try { osc.disconnect(); } catch(e){}
+          try { gain.disconnect(); } catch(e){}
+        }
+      });
     };
 
     const bubbleInterval = window.setInterval(() => {
@@ -361,7 +405,7 @@ class SynthEngine {
 
     // 3. Singing Birds
     const playBirdChirp = () => {
-      if (!this.isRunning || !this.ctx || !this.masterGain) return;
+      if (!this.isRunning || !this.ctx || !this.trackGain) return;
       const now = ctx.currentTime;
       
       const numChirps = 2 + Math.floor(Math.random() * 3);
@@ -384,16 +428,27 @@ class SynthEngine {
         gain.gain.exponentialRampToValueAtTime(0.00001, now + chirpDelay + duration);
         
         osc.connect(gain);
-        gain.connect(master);
+        gain.connect(outNode);
         
         osc.start(now + chirpDelay);
-        osc.stop(now + chirpDelay + duration);
+        try {
+          osc.stop(now + chirpDelay + duration);
+        } catch (e) {}
+
+        this.activeSources.push({
+          node: osc,
+          stop: () => {
+            try { osc.stop(); } catch(e){}
+            try { osc.disconnect(); } catch(e){}
+            try { gain.disconnect(); } catch(e){}
+          }
+        });
         
         chirpDelay += duration + 0.03 + Math.random() * 0.05;
       }
     };
 
-    // Chirp every 3 to 6 seconds
+    // Chirp every 3.5 seconds
     const birdInterval = window.setInterval(() => {
       if (Math.random() > 0.4) {
         playBirdChirp();
@@ -404,16 +459,15 @@ class SynthEngine {
 
   // --- Track 4: Energetic & Upbeat Synth (Nhạc hào hứng, năng động) ---
   private startEnergetic() {
-    if (!this.ctx || !this.masterGain) return;
+    if (!this.ctx || !this.trackGain) return;
     const ctx = this.ctx;
-    const master = this.masterGain;
+    const outNode = this.trackGain;
 
     // 124 BPM -> 1 beat = 0.484 seconds. 8th note step = 0.242 seconds.
     const stepLen = 60 / 124 / 2; 
     let stepCount = 0;
 
     // Upbeat Positive chords: I - V - vi - IV progression
-    // Chord roots: F3, C3, D3, Bb2
     const chords = [
       { root: 174.61, notes: [174.61, 220.00, 261.63, 349.23] }, // F3, A3, C4, F4
       { root: 130.81, notes: [130.81, 164.81, 196.00, 261.63] }, // C3, E3, G3, C4
@@ -422,7 +476,7 @@ class SynthEngine {
     ];
 
     const playEnergeticStep = () => {
-      if (!this.isRunning || !this.ctx || !this.masterGain) return;
+      if (!this.isRunning || !this.ctx || !this.trackGain) return;
       const now = ctx.currentTime;
 
       // Chord index changes every 16 steps (8 beats)
@@ -451,10 +505,21 @@ class SynthEngine {
 
         bassOsc.connect(bassGain);
         bassGain.connect(bassFilter);
-        bassFilter.connect(master);
+        bassFilter.connect(outNode);
 
         bassOsc.start(now);
-        bassOsc.stop(now + stepLen);
+        try {
+          bassOsc.stop(now + stepLen);
+        } catch (e) {}
+
+        this.activeSources.push({
+          node: bassOsc,
+          stop: () => {
+            try { bassOsc.stop(); } catch(e){}
+            try { bassOsc.disconnect(); } catch(e){}
+            try { bassGain.disconnect(); } catch(e){}
+          }
+        });
       }
 
       // 2. Upbeat Arpeggiator Pluck (Plays bright, melodic 8th note run)
@@ -478,17 +543,28 @@ class SynthEngine {
 
       pluckOsc.connect(pluckGain);
       pluckGain.connect(pluckFilter);
-      pluckFilter.connect(master);
+      pluckFilter.connect(outNode);
 
       pluckOsc.start(now);
-      pluckOsc.stop(now + 0.15);
+      try {
+        pluckOsc.stop(now + 0.15);
+      } catch (e) {}
+
+      this.activeSources.push({
+        node: pluckOsc,
+        stop: () => {
+          try { pluckOsc.stop(); } catch(e){}
+          try { pluckOsc.disconnect(); } catch(e){}
+          try { pluckGain.disconnect(); } catch(e){}
+        }
+      });
 
       // 3. Upbeat Shaker / Hi-Hat
       const isOffbeat = stepInMeasure % 4 === 2;
       const isOnbeat = stepInMeasure % 4 === 0;
       if (isOffbeat || (Math.random() > 0.7 && !isOnbeat)) {
         const noiseNode = ctx.createBufferSource();
-        const bufferSize = ctx.sampleRate * 0.04;
+        const bufferSize = Math.floor(ctx.sampleRate * 0.04);
         const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
         const data = buffer.getChannelData(0);
         for (let i = 0; i < bufferSize; i++) {
@@ -506,9 +582,18 @@ class SynthEngine {
 
         noiseNode.connect(noiseFilter);
         noiseFilter.connect(noiseGain);
-        noiseGain.connect(master);
+        noiseGain.connect(outNode);
 
         noiseNode.start(now);
+
+        this.activeSources.push({
+          node: noiseNode,
+          stop: () => {
+            try { noiseNode.stop(); } catch(e){}
+            try { noiseNode.disconnect(); } catch(e){}
+            try { noiseGain.disconnect(); } catch(e){}
+          }
+        });
       }
 
       stepCount++;
@@ -522,18 +607,18 @@ class SynthEngine {
     this.activeIntervals.push(energeticInterval);
   }
 
-  // --- Track 4: Hypnotic Lofi Pulse (Rhythmic ticking for tracking time) ---
+  // --- Track 5: Hypnotic Lofi Pulse (Rhythmic ticking for tracking time) ---
   private startMetronome() {
-    if (!this.ctx || !this.masterGain) return;
+    if (!this.ctx || !this.trackGain) return;
     const ctx = this.ctx;
-    const master = this.masterGain;
+    const outNode = this.trackGain;
 
     // Tempo: 70 BPM (0.857s per beat)
     const beatLen = 60 / 70; 
     let beatCount = 0;
 
     const playBeat = () => {
-      if (!this.isRunning || !this.ctx || !this.masterGain) return;
+      if (!this.isRunning || !this.ctx || !this.trackGain) return;
       const now = ctx.currentTime;
 
       // 1. Cozy warm low synth bass note on beat 1 and 3
@@ -556,10 +641,21 @@ class SynthEngine {
 
         bassOsc.connect(bassGain);
         bassGain.connect(filter);
-        filter.connect(master);
+        filter.connect(outNode);
 
         bassOsc.start(now);
-        bassOsc.stop(now + 0.6);
+        try {
+          bassOsc.stop(now + 0.6);
+        } catch (e) {}
+
+        this.activeSources.push({
+          node: bassOsc,
+          stop: () => {
+            try { bassOsc.stop(); } catch(e){}
+            try { bassOsc.disconnect(); } catch(e){}
+            try { bassGain.disconnect(); } catch(e){}
+          }
+        });
       }
 
       // 2. Soft woodblock ticking on every beat (high pitch triangle)
@@ -576,16 +672,26 @@ class SynthEngine {
       tickGain.gain.exponentialRampToValueAtTime(0.00001, now + 0.04);
 
       tickOsc.connect(tickGain);
-      tickGain.connect(master);
+      tickGain.connect(outNode);
 
       tickOsc.start(now);
-      tickOsc.stop(now + 0.05);
+      try {
+        tickOsc.stop(now + 0.05);
+      } catch (e) {}
+
+      this.activeSources.push({
+        node: tickOsc,
+        stop: () => {
+          try { tickOsc.stop(); } catch(e){}
+          try { tickOsc.disconnect(); } catch(e){}
+          try { tickGain.disconnect(); } catch(e){}
+        }
+      });
 
       // 3. Super soft filtered shaker on beat 2 and 4 (very short noise burst)
       if (beatCount % 4 === 1 || beatCount % 4 === 3) {
         const noiseNode = ctx.createBufferSource();
-        // Generate small noise buffer
-        const bufferSize = ctx.sampleRate * 0.05; // 50ms
+        const bufferSize = Math.floor(ctx.sampleRate * 0.05); // 50ms
         const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
         const data = buffer.getChannelData(0);
         for (let i = 0; i < bufferSize; i++) {
@@ -604,9 +710,18 @@ class SynthEngine {
 
         noiseNode.connect(noiseFilter);
         noiseFilter.connect(noiseGain);
-        noiseGain.connect(master);
+        noiseGain.connect(outNode);
 
         noiseNode.start(now);
+
+        this.activeSources.push({
+          node: noiseNode,
+          stop: () => {
+            try { noiseNode.stop(); } catch(e){}
+            try { noiseNode.disconnect(); } catch(e){}
+            try { noiseGain.disconnect(); } catch(e){}
+          }
+        });
       }
 
       beatCount++;
