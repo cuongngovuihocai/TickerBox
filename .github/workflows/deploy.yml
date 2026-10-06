@@ -1,9 +1,9 @@
 name: Deploy to GitHub Pages
 
 on:
-  # Chạy workflow khi có push vào nhánh được chọn
+  # Chạy workflow khi có push vào nhánh main hoặc master
   push:
-    branches: [ "main" ]
+    branches: [ "main", "master" ]
   # Cho phép chạy workflow thủ công từ tab Actions
   workflow_dispatch:
 
@@ -28,7 +28,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           
       - name: Install dependencies
         run: npm install
