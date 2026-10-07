@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { TimerState } from '../types';
-import { Layers, MonitorPlay, ExternalLink, Sliders, Eye, EyeOff, Check, Maximize2, Minimize2, ZoomIn, ZoomOut, Type } from 'lucide-react';
+import { Layers, MonitorPlay, ExternalLink, Sliders, Eye, EyeOff, Check, Maximize2, Minimize2, ZoomIn, ZoomOut, Type, Pipette, ClipboardPaste } from 'lucide-react';
 
 interface PiPProps {
   state: TimerState;
@@ -28,14 +28,73 @@ export default function PictureInPictureButton({ state, onOpenProjectorTab, onSw
   const [showSettings, setShowSettings] = useState<boolean>(false);
   
   // Customization States for PiP Window
-  const [pipBgType, setPipBgType] = useState<'dark' | 'light' | 'transparent' | 'chroma' | 'custom'>('dark');
-  const [pipCustomBgColor, setPipCustomBgColor] = useState<string>('#ffffff');
+  const [pipBgType, setPipBgType] = useState<'dark' | 'light' | 'transparent' | 'chroma' | 'custom'>(() => {
+    return (localStorage.getItem('pip_bg_type') as any) || 'dark';
+  });
+  const [pipCustomBgColor, setPipCustomBgColor] = useState<string>(() => {
+    return localStorage.getItem('pip_custom_bg_color') || '#ffffff';
+  });
   const [pipScale, setPipScale] = useState<number>(0.85); // Default is 0.85 to leave nice outer margins
   const [showTitle, setShowTitle] = useState<boolean>(true);
   const [showCircle, setShowCircle] = useState<boolean>(true);
   const [showStatus, setShowStatus] = useState<boolean>(true);
 
+  // Screen color sampling & clipboard state
+  const [hasEyeDropper, setHasEyeDropper] = useState<boolean>(false);
+  const [isPickingColor, setIsPickingColor] = useState<boolean>(false);
+  const [colorFeedback, setColorFeedback] = useState<string | null>(null);
+
   const animationFrameId = useRef<number | null>(null);
+
+  useEffect(() => {
+    setHasEyeDropper(typeof window !== 'undefined' && 'EyeDropper' in window);
+  }, []);
+
+  const handleSetCustomColor = (color: string) => {
+    setPipCustomBgColor(color);
+    setPipBgType('custom');
+    localStorage.setItem('pip_custom_bg_color', color);
+    localStorage.setItem('pip_bg_type', 'custom');
+  };
+
+  const handlePickColor = async () => {
+    if ('EyeDropper' in window) {
+      try {
+        setIsPickingColor(true);
+        const eyeDropper = new (window as any).EyeDropper();
+        const result = await eyeDropper.open();
+        if (result && result.sRGBHex) {
+          handleSetCustomColor(result.sRGBHex);
+          setColorFeedback(`Đã sao chép màu: ${result.sRGBHex.toUpperCase()}`);
+          setTimeout(() => setColorFeedback(null), 3000);
+        }
+      } catch (e) {
+        // User pressed Escape or canceled picker
+      } finally {
+        setIsPickingColor(false);
+      }
+    }
+  };
+
+  const handlePasteColor = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      const trimmed = text.trim();
+      const match = trimmed.match(/^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
+      if (match) {
+        const hex = trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+        handleSetCustomColor(hex);
+        setColorFeedback(`Đã dán màu: ${hex.toUpperCase()}`);
+        setTimeout(() => setColorFeedback(null), 3000);
+      } else {
+        setColorFeedback('Nội dung clipboard không phải mã màu hợp lệ');
+        setTimeout(() => setColorFeedback(null), 2500);
+      }
+    } catch (e) {
+      setColorFeedback('Vui lòng cấp quyền đọc clipboard');
+      setTimeout(() => setColorFeedback(null), 2500);
+    }
+  };
 
   // Check if browser supports canvas-to-video Picture-in-Picture
   useEffect(() => {
@@ -391,7 +450,7 @@ export default function PictureInPictureButton({ state, onOpenProjectorTab, onSw
           {/* Settings Detail Section */}
           <div 
             className={`transition-all duration-300 ease-in-out ${
-              showSettings ? 'max-h-[500px] p-4 opacity-100' : 'max-h-0 opacity-0 pointer-events-none overflow-hidden'
+              showSettings ? 'max-h-[900px] p-4 opacity-100' : 'max-h-0 opacity-0 pointer-events-none overflow-hidden'
             } flex flex-col gap-4 text-xs`}
           >
             {/* Explanatory banner about native transparency constraint */}
@@ -401,15 +460,24 @@ export default function PictureInPictureButton({ state, onOpenProjectorTab, onSw
 
             {/* 1. Background type & color choice */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] uppercase tracking-wider font-bold text-[#E0D8D0]/50 flex items-center gap-1.5">
-                <Eye className="w-3 h-3 text-[#D4AF37]" />
-                Màu nền cửa sổ nổi
-              </label>
-              <div className="grid grid-cols-5 gap-1.5 mt-1">
+              <div className="flex justify-between items-center">
+                <label className="text-[10px] uppercase tracking-wider font-bold text-[#E0D8D0]/50 flex items-center gap-1.5">
+                  <Eye className="w-3 h-3 text-[#D4AF37]" />
+                  Màu nền cửa sổ nổi
+                </label>
+                {colorFeedback && (
+                  <span className="text-[9px] text-[#D4AF37] font-medium bg-[#D4AF37]/10 px-2 py-0.5 rounded border border-[#D4AF37]/20 animate-fadeIn flex items-center gap-1">
+                    <Check className="w-2.5 h-2.5" />
+                    {colorFeedback}
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-5 gap-1.5 mt-0.5">
                 <button
                   type="button"
-                  onClick={() => setPipBgType('dark')}
-                  className={`py-1 text-[10px] font-semibold border rounded transition-all ${
+                  onClick={() => { setPipBgType('dark'); localStorage.setItem('pip_bg_type', 'dark'); }}
+                  className={`py-1 text-[10px] font-semibold border rounded transition-all cursor-pointer ${
                     pipBgType === 'dark' ? 'bg-[#D4AF37]/15 border-[#D4AF37] text-[#D4AF37]' : 'bg-[#1A1A1C] border-[#2A2A2C] text-[#E0D8D0]/70 hover:bg-[#2A2A2C]'
                   }`}
                   title="Nền tối xanh đen"
@@ -418,8 +486,8 @@ export default function PictureInPictureButton({ state, onOpenProjectorTab, onSw
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPipBgType('light')}
-                  className={`py-1 text-[10px] font-semibold border rounded transition-all ${
+                  onClick={() => { setPipBgType('light'); localStorage.setItem('pip_bg_type', 'light'); }}
+                  className={`py-1 text-[10px] font-semibold border rounded transition-all cursor-pointer ${
                     pipBgType === 'light' ? 'bg-[#D4AF37]/15 border-[#D4AF37] text-[#D4AF37]' : 'bg-[#1A1A1C] border-[#2A2A2C] text-[#E0D8D0]/70 hover:bg-[#2A2A2C]'
                   }`}
                   title="Nền sáng trắng"
@@ -428,8 +496,8 @@ export default function PictureInPictureButton({ state, onOpenProjectorTab, onSw
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPipBgType('transparent')}
-                  className={`py-1 text-[10px] font-semibold border rounded transition-all ${
+                  onClick={() => { setPipBgType('transparent'); localStorage.setItem('pip_bg_type', 'transparent'); }}
+                  className={`py-1 text-[10px] font-semibold border rounded transition-all cursor-pointer ${
                     pipBgType === 'transparent' ? 'bg-[#D4AF37]/15 border-[#D4AF37] text-[#D4AF37]' : 'bg-[#1A1A1C] border-[#2A2A2C] text-[#E0D8D0]/70 hover:bg-[#2A2A2C]'
                   }`}
                   title="Không nền (Dành cho trình duyệt hỗ trợ kênh alpha)"
@@ -438,8 +506,8 @@ export default function PictureInPictureButton({ state, onOpenProjectorTab, onSw
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPipBgType('chroma')}
-                  className={`py-1 text-[10px] font-semibold border rounded transition-all ${
+                  onClick={() => { setPipBgType('chroma'); localStorage.setItem('pip_bg_type', 'chroma'); }}
+                  className={`py-1 text-[10px] font-semibold border rounded transition-all cursor-pointer ${
                     pipBgType === 'chroma' ? 'bg-[#D4AF37]/15 border-[#D4AF37] text-[#D4AF37]' : 'bg-[#1A1A1C] border-[#2A2A2C] text-[#E0D8D0]/70 hover:bg-[#2A2A2C]'
                   }`}
                   title="Xanh lá Chroma Key để lọc ghép livestream"
@@ -448,32 +516,98 @@ export default function PictureInPictureButton({ state, onOpenProjectorTab, onSw
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPipBgType('custom')}
-                  className={`py-1 text-[10px] font-semibold border rounded transition-all ${
+                  onClick={() => { setPipBgType('custom'); localStorage.setItem('pip_bg_type', 'custom'); }}
+                  className={`py-1 text-[10px] font-semibold border rounded transition-all cursor-pointer ${
                     pipBgType === 'custom' ? 'bg-[#D4AF37]/15 border-[#D4AF37] text-[#D4AF37]' : 'bg-[#1A1A1C] border-[#2A2A2C] text-[#E0D8D0]/70 hover:bg-[#2A2A2C]'
                   }`}
-                  title="Nhập màu tùy chỉnh trùng màu slide"
+                  title="Tùy chỉnh màu nền hoặc sao chép màu từ slide"
                 >
                   Màu..
                 </button>
               </div>
 
+              {/* Advanced Color Extraction & EyeDropper Tools */}
               {pipBgType === 'custom' && (
-                <div className="flex items-center gap-2 mt-1.5 animate-fadeIn">
-                  <span className="text-[10px] text-[#E0D8D0]/60">Mã HEX:</span>
-                  <input
-                    type="color"
-                    value={pipCustomBgColor}
-                    onChange={(e) => setPipCustomBgColor(e.target.value)}
-                    className="w-6 h-6 rounded border border-[#2A2A2C] cursor-pointer bg-transparent"
-                  />
-                  <input
-                    type="text"
-                    value={pipCustomBgColor}
-                    onChange={(e) => setPipCustomBgColor(e.target.value)}
-                    className="flex-1 bg-[#1A1A1C] border border-[#2A2A2C] rounded px-2 py-1 text-xs text-[#E0D8D0] font-mono"
-                    placeholder="#ffffff"
-                  />
+                <div className="flex flex-col gap-2 p-2.5 bg-[#121214] border border-[#2A2A2C] rounded-lg mt-1 animate-fadeIn">
+                  {/* EyeDropper & Paste Buttons */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {hasEyeDropper ? (
+                      <button
+                        type="button"
+                        onClick={handlePickColor}
+                        disabled={isPickingColor}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-[#D4AF37]/10 hover:bg-[#D4AF37]/20 border border-[#D4AF37]/40 hover:border-[#D4AF37] text-[#D4AF37] rounded-md text-[11px] font-semibold transition-all cursor-pointer shadow-sm disabled:opacity-50"
+                        title="Bấm vào đây rồi nhấp chuột vào bất kỳ vị trí nào trên màn hình (slide PowerPoint, Canva, website, v.v.) để lấy chính xác màu nền"
+                      >
+                        <Pipette className={`w-3.5 h-3.5 ${isPickingColor ? 'animate-bounce' : ''}`} />
+                        <span>{isPickingColor ? 'Đang chấm màu...' : 'Hút màu từ màn hình / Slide'}</span>
+                      </button>
+                    ) : (
+                      <span className="text-[10px] text-[#E0D8D0]/50 italic">
+                        (Dùng Chrome/Edge để bật công cụ ống hút màu trực tiếp từ slide)
+                      </span>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handlePasteColor}
+                      className="flex items-center justify-center gap-1 px-2.5 py-1.5 bg-[#1A1A1C] hover:bg-[#2A2A2C] border border-[#2A2A2C] hover:border-[#D4AF37]/50 text-[#E0D8D0] rounded-md text-[11px] font-medium transition-all cursor-pointer"
+                      title="Dán mã màu HEX từ Clipboard (ví dụ vừa sao chép từ PowerPoint / Photoshop / Canva)"
+                    >
+                      <ClipboardPaste className="w-3.5 h-3.5 text-[#D4AF37]" />
+                      <span>Dán mã màu</span>
+                    </button>
+                  </div>
+
+                  {/* Manual HEX input & Native color swatch */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-[#E0D8D0]/60 shrink-0">Mã HEX:</span>
+                    <div className="relative flex items-center">
+                      <input
+                        type="color"
+                        value={pipCustomBgColor}
+                        onChange={(e) => handleSetCustomColor(e.target.value)}
+                        className="w-7 h-7 rounded border border-[#2A2A2C] cursor-pointer bg-transparent p-0"
+                        title="Mở bảng chọn màu chi tiết"
+                      />
+                    </div>
+                    <input
+                      type="text"
+                      value={pipCustomBgColor}
+                      onChange={(e) => handleSetCustomColor(e.target.value)}
+                      className="flex-1 bg-[#1A1A1C] border border-[#2A2A2C] focus:border-[#D4AF37]/60 rounded px-2.5 py-1 text-xs text-[#E0D8D0] font-mono uppercase"
+                      placeholder="#FFFFFF"
+                    />
+                  </div>
+
+                  {/* Quick Preset Slide Colors Palette */}
+                  <div className="flex items-center gap-1.5 pt-1.5 border-t border-[#2A2A2C]/60 flex-wrap">
+                    <span className="text-[9px] text-[#E0D8D0]/40 shrink-0">Mẫu slide:</span>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {[
+                        { label: 'Trắng slide', color: '#FFFFFF' },
+                        { label: 'Đen sâu', color: '#000000' },
+                        { label: 'Xám Keynote', color: '#1E1E1E' },
+                        { label: 'Xanh Navy', color: '#0F172A' },
+                        { label: 'Be Canva', color: '#F5F5F0' },
+                        { label: 'Xanh Coban', color: '#1E3A8A' },
+                      ].map((preset) => (
+                        <button
+                          key={preset.color}
+                          type="button"
+                          onClick={() => handleSetCustomColor(preset.color)}
+                          className="group flex items-center gap-1 px-1.5 py-0.5 rounded border border-[#2A2A2C] hover:border-[#D4AF37]/60 bg-[#1A1A1C] text-[9px] transition-all cursor-pointer"
+                          title={`Áp dụng màu ${preset.label} (${preset.color})`}
+                        >
+                          <span
+                            className="w-2.5 h-2.5 rounded-full border border-black/30 shrink-0"
+                            style={{ backgroundColor: preset.color }}
+                          />
+                          <span className="text-[#E0D8D0]/70 group-hover:text-[#F2EFE9]">{preset.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

@@ -177,7 +177,7 @@ export default function ProjectorDisplay({ state, onBackToController }: Projecto
         >
           {/* Slide Title */}
           <span 
-            className={`text-[10px] uppercase tracking-[0.15em] font-bold text-center truncate max-w-[90%] mb-3.5 ${
+            className={`text-xs uppercase tracking-[0.15em] font-title font-semibold text-center truncate max-w-[90%] mb-3.5 ${
               isTransparent 
                 ? 'text-[#F2EFE9] drop-shadow-[0_2px_3px_rgba(0,0,0,0.95)]' 
                 : ''
@@ -354,7 +354,7 @@ export default function ProjectorDisplay({ state, onBackToController }: Projecto
         />
 
         {/* Current Segment Title */}
-        <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-serif tracking-[0.05em] font-medium text-[#F2EFE9] text-center mb-8 max-w-4xl truncate uppercase drop-shadow">
+        <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-title tracking-[0.05em] font-medium text-[#F2EFE9] text-center mb-8 max-w-4xl truncate uppercase drop-shadow">
           {state.title}
         </h1>
 

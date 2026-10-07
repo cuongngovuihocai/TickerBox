@@ -5,8 +5,12 @@ import {defineConfig} from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
+  // Use '/TickerBox/' when deploying to GitHub Pages (GITHUB_ACTIONS=true), and '/' for AI Studio development
+  const isGitHubPages = process.env.GITHUB_ACTIONS === 'true' || process.env.DEPLOY_TARGET === 'gh-pages';
+  const base = process.env.VITE_BASE || (isGitHubPages ? '/TickerBox/' : '/');
+
   return {
-    base: '/TickerBox/',
+    base,
     plugins: [
       react(),
       tailwindcss(),
@@ -14,15 +18,15 @@ export default defineConfig(() => {
         registerType: 'autoUpdate',
         includeAssets: ['favicon.ico', 'favicon.svg', 'apple-touch-icon.png', 'icon.svg'],
         manifest: {
-          id: '/TickerBox/',
+          id: base,
           name: 'TickerBox - Bộ Đếm Trình Chiếu',
           short_name: 'TickerBox',
           description: 'Bộ đếm thời gian trình chiếu tối giản hỗ trợ hiển thị đa màn hình, chế độ ẩn giây và cửa sổ nổi PiP cùng thư viện nhạc nền.',
           theme_color: '#0D0D0E',
           background_color: '#0D0D0E',
           display: 'standalone',
-          start_url: '/TickerBox/',
-          scope: '/TickerBox/',
+          start_url: base,
+          scope: base,
           icons: [
             {
               src: 'pwa-192x192.png',

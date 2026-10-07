@@ -261,7 +261,7 @@ export default function PresenterControls({
             ) : (
               <h2 
                 onClick={() => { setTempTitle(state.title); setEditingTitle(true); }}
-                className="text-xs uppercase tracking-[0.2em] text-[#E0D8D0]/60 mb-1 hover:text-[#F2EFE9] transition-all cursor-pointer flex items-center gap-1.5"
+                className="text-xs uppercase tracking-[0.2em] font-title font-semibold text-[#E0D8D0]/60 mb-1 hover:text-[#F2EFE9] transition-all cursor-pointer flex items-center gap-1.5"
                 title="Nhấp để thay đổi tiêu đề"
               >
                 <span>{state.title}</span>
