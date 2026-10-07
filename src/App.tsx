@@ -4,7 +4,7 @@ import PresenterControls from './components/PresenterControls';
 import ProjectorDisplay from './components/ProjectorDisplay';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
-import { Timer, MonitorPlay, Sparkles, Sliders, ExternalLink, RefreshCw } from 'lucide-react';
+import { Timer, MonitorPlay, Sparkles, ExternalLink, RefreshCw } from 'lucide-react';
 
 export default function App() {
   const [mode, setMode] = useState<'controller' | 'projector'>(() => {
@@ -99,23 +99,13 @@ export default function App() {
           selectMusic={timer.selectMusic}
           toggleMusicPlay={timer.toggleMusicPlay}
           setMusicVolume={timer.setMusicVolume}
+          setAlarmSound={timer.setAlarmSound}
+          setAlarmVolume={timer.setAlarmVolume}
+          playTestAlarm={timer.playTestAlarm}
+          stopAlarm={timer.stopAlarm}
           onSwitchToMirrorMode={() => handleModeChange('projector')}
         />
       </main>
-
-      {/* FOOTER & USAGE INFO */}
-      <footer className="relative z-10 border-t border-[#2A2A2C] bg-[#09090A]/80 backdrop-blur-sm py-2 px-4 sm:px-6">
-        <div className="max-w-7xl mx-auto flex items-center justify-center text-[#E0D8D0]/60 text-[11px]">
-          <div className="flex items-center gap-2">
-            <Sliders className="w-3.5 h-3.5 text-slate-500" />
-            <span>Trạng thái:</span>
-            <span className="font-semibold text-[#D4AF37] flex items-center gap-1.5 bg-[#D4AF37]/5 px-2.5 py-0.5 rounded border border-[#D4AF37]/10 text-[10px]">
-              <span className="h-1.5 w-1.5 bg-[#D4AF37] rounded-full animate-pulse" />
-              Đồng bộ đa màn hình sẵn sàng
-            </span>
-          </div>
-        </div>
-      </footer>
 
       {/* PWA Offline indicator toast */}
       <OfflineIndicator />

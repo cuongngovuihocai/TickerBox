@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { TimerState, TimerStatus, Preset, SyncMessage } from '../types';
 import { synthEngine } from './synthAudio';
+import { alarmEngine } from './alarmAudio';
 
 // Static Presets available for quick selection
 export const PRESETS: Preset[] = [
@@ -25,6 +26,8 @@ const DEFAULT_STATE: TimerState = {
   musicVolume: 0.5,
   musicPlaying: false,
   currentPresetId: 'present',
+  alarmSoundId: 'airport',
+  alarmVolume: 1.0,
 };
 
 export function useSyncTimer(role: 'controller' | 'projector' | 'any' = 'any') {
@@ -34,18 +37,26 @@ export function useSyncTimer(role: 'controller' | 'projector' | 'any' = 'any') {
     if (saved) {
       try {
         const parsed = JSON.parse(saved) as TimerState;
+        // Ensure alarm properties have defaults
+        const sanitized: TimerState = {
+          ...DEFAULT_STATE,
+          ...parsed,
+          alarmSoundId: parsed.alarmSoundId || DEFAULT_STATE.alarmSoundId,
+          alarmVolume: typeof parsed.alarmVolume === 'number' ? parsed.alarmVolume : DEFAULT_STATE.alarmVolume,
+        };
+
         // If it was running, we calculate the elapsed time based on the active endTime
         const endTime = localStorage.getItem('presentation_timer_endtime');
-        if (parsed.status === 'running' && endTime) {
+        if (sanitized.status === 'running' && endTime) {
           const endTs = parseInt(endTime, 10);
           const remaining = Math.max(0, Math.ceil((endTs - Date.now()) / 1000));
           return {
-            ...parsed,
+            ...sanitized,
             remainingTime: remaining,
             status: remaining > 0 ? 'running' : 'completed',
           };
         }
-        return parsed;
+        return sanitized;
       } catch (e) {
         return DEFAULT_STATE;
       }
@@ -152,8 +163,8 @@ export function useSyncTimer(role: 'controller' | 'projector' | 'any' = 'any') {
           musicPlaying: false, // Turn off music on completion
         });
         
-        // Play final chime sound
-        triggerBellRing();
+        // Play final alarm sound with debounce guard so multiple tabs on same machine don't double play
+        playCompletionAlarm();
       } else {
         // Just update local remaining time
         setState((prev) => {
@@ -166,34 +177,31 @@ export function useSyncTimer(role: 'controller' | 'projector' | 'any' = 'any') {
     return () => clearInterval(timer);
   }, [state.status]);
 
-  // Simple Web Audio alert bell when time completes
-  const triggerBellRing = () => {
+  // Play alarm sound using alarmEngine with cross-tab debounce guard
+  const playCompletionAlarm = () => {
     try {
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      const ctx = new AudioContextClass();
-      const now = ctx.currentTime;
-      
-      // Beautiful triple chime
-      const scheduleChime = (delay: number, pitch: number) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(pitch, now + delay);
-        
-        gain.gain.setValueAtTime(0, now + delay);
-        gain.gain.linearRampToValueAtTime(0.3, now + delay + 0.05);
-        gain.gain.exponentialRampToValueAtTime(0.00001, now + delay + 1.2);
-        
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(now + delay);
-        osc.stop(now + delay + 1.3);
-      };
+      const lastPlayedStr = localStorage.getItem('last_alarm_played_ts');
+      const now = Date.now();
+      if (lastPlayedStr) {
+        const diff = now - parseInt(lastPlayedStr, 10);
+        if (diff < 2500) {
+          // Alarm was just played by another tab less than 2.5s ago
+          return;
+        }
+      }
+      localStorage.setItem('last_alarm_played_ts', now.toString());
+      alarmEngine.play(stateRef.current.alarmSoundId || 'digital', stateRef.current.alarmVolume ?? 1.0);
+    } catch {
+      alarmEngine.play('digital', 1.0);
+    }
+  };
 
-      scheduleChime(0, 523.25);   // C5
-      scheduleChime(0.25, 659.25); // E5
-      scheduleChime(0.5, 783.99);  // G5
-    } catch (e) {}
+  const playTestAlarm = () => {
+    alarmEngine.play(state.alarmSoundId || 'digital', state.alarmVolume ?? 1.0);
+  };
+
+  const stopAlarm = () => {
+    alarmEngine.stop();
   };
 
   // Broadcast and save state changes
@@ -307,6 +315,18 @@ export function useSyncTimer(role: 'controller' | 'projector' | 'any' = 'any') {
     });
   };
 
+  const setAlarmSound = (soundId: string) => {
+    updateState({
+      alarmSoundId: soundId,
+    });
+  };
+
+  const setAlarmVolume = (vol: number) => {
+    updateState({
+      alarmVolume: vol,
+    });
+  };
+
   return {
     state,
     startTimer,
@@ -320,6 +340,10 @@ export function useSyncTimer(role: 'controller' | 'projector' | 'any' = 'any') {
     selectMusic,
     toggleMusicPlay,
     setMusicVolume,
+    setAlarmSound,
+    setAlarmVolume,
+    playTestAlarm,
+    stopAlarm,
     updateState, // generic updater
   };
 }

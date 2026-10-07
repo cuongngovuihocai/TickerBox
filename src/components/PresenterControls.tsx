@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { TimerState, Preset } from '../types';
 import { PRESETS } from '../lib/useSyncTimer';
 import { synthEngine } from '../lib/synthAudio';
+import { ALARM_SOUND_OPTIONS, alarmEngine } from '../lib/alarmAudio';
 import {
   Play,
   Pause,
@@ -22,7 +23,7 @@ import {
   ChevronDown,
   Check,
   Radio,
-  Sliders
+  BellRing
 } from 'lucide-react';
 import PictureInPictureButton from './PictureInPictureButton';
 
@@ -39,6 +40,10 @@ interface PresenterControlsProps {
   selectMusic: (musicId: string) => void;
   toggleMusicPlay: () => void;
   setMusicVolume: (vol: number) => void;
+  setAlarmSound: (soundId: string) => void;
+  setAlarmVolume: (vol: number) => void;
+  playTestAlarm: () => void;
+  stopAlarm: () => void;
   onSwitchToMirrorMode?: () => void;
 }
 
@@ -55,6 +60,10 @@ export default function PresenterControls({
   selectMusic,
   toggleMusicPlay,
   setMusicVolume,
+  setAlarmSound,
+  setAlarmVolume,
+  playTestAlarm,
+  stopAlarm,
   onSwitchToMirrorMode,
 }: PresenterControlsProps) {
   const [customMin, setCustomMin] = useState<string>('10');
@@ -65,10 +74,13 @@ export default function PresenterControls({
   // Dropdown states
   const [isMusicOpen, setIsMusicOpen] = useState<boolean>(false);
   const [isPresetsOpen, setIsPresetsOpen] = useState<boolean>(false);
+  const [isAlarmOpen, setIsAlarmOpen] = useState<boolean>(false);
   const [previewTrackId, setPreviewTrackId] = useState<string | null>(null);
+  const [previewAlarmId, setPreviewAlarmId] = useState<string | null>(null);
 
   const musicDropdownRef = useRef<HTMLDivElement | null>(null);
   const presetsDropdownRef = useRef<HTMLDivElement | null>(null);
+  const alarmDropdownRef = useRef<HTMLDivElement | null>(null);
 
   const musicTracks = [
     { id: 'none', title: 'Không phát nhạc nền', desc: 'Chỉ đếm ngược trong tĩnh lặng', icon: '🔇' },
@@ -109,10 +121,23 @@ export default function PresenterControls({
       if (presetsDropdownRef.current && !presetsDropdownRef.current.contains(e.target as Node)) {
         setIsPresetsOpen(false);
       }
+      if (alarmDropdownRef.current && !alarmDropdownRef.current.contains(e.target as Node)) {
+        if (isAlarmOpen) {
+          setIsAlarmOpen(false);
+          handleStopAlarmPreview();
+        }
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isMusicOpen, isPresetsOpen, state.status, state.musicPlaying, state.selectedMusicId]);
+  }, [isMusicOpen, isPresetsOpen, isAlarmOpen, state.status, state.musicPlaying, state.selectedMusicId]);
+
+  // Clean up audio on unmount
+  useEffect(() => {
+    return () => {
+      alarmEngine.stop();
+    };
+  }, []);
 
   // Audio Preview Handling (Hover or Click)
   const handlePreviewTrack = (trackId: string) => {
@@ -156,6 +181,32 @@ export default function PresenterControls({
   const handleVolumeChange = (vol: number) => {
     setMusicVolume(vol);
     synthEngine.setVolume(vol);
+  };
+
+  // Alarm Preview & Selection Handling (Hover or Click, exactly like Music Library)
+  const handlePreviewAlarm = (soundId: string) => {
+    if (previewAlarmId === soundId) return;
+    setPreviewAlarmId(soundId);
+    const vol = typeof state.alarmVolume === 'number' ? state.alarmVolume : 1.0;
+    alarmEngine.play(soundId, vol);
+  };
+
+  const handleStopAlarmPreview = () => {
+    setPreviewAlarmId(null);
+    alarmEngine.stop();
+  };
+
+  const handleSelectAlarm = (soundId: string) => {
+    setAlarmSound(soundId);
+    setIsAlarmOpen(false);
+    handleStopAlarmPreview();
+  };
+
+  const handleAlarmVolumeChange = (vol: number) => {
+    setAlarmVolume(vol);
+    if (previewAlarmId) {
+      alarmEngine.play(previewAlarmId, vol);
+    }
   };
 
   const handleApplyCustomTime = (e: React.FormEvent) => {
@@ -635,7 +686,135 @@ export default function PresenterControls({
           </div>
         </div>
 
-        {/* 3. TÙY CHỌN TRÌNH CHIẾU & GIAO DIỆN */}
+        {/* 3. ÂM BÁO HẾT GIỜ (Bố cục đồng bộ Thư viện Nhạc Nền, rê chuột nghe thử) */}
+        <div className="bg-[#1A1A1C] border border-[#2A2A2C] rounded-2xl p-4 shadow-xl flex flex-col gap-3 relative">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <BellRing className="w-4 h-4 text-[#D4AF37]" />
+              <h3 className="font-serif text-xs tracking-wider font-semibold text-[#F2EFE9] uppercase">
+                Âm Báo Hết Giờ
+              </h3>
+            </div>
+            {previewAlarmId && (
+              <span className="text-[10px] text-[#D4AF37] font-semibold animate-pulse flex items-center gap-1">
+                <Radio className="w-3 h-3" />
+                Đang nghe thử...
+              </span>
+            )}
+          </div>
+
+          {/* Alarm Control Bar: Dropdown Trigger + Volume Slider */}
+          <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
+            {(() => {
+              const currentAlarmId = state.alarmSoundId || 'airport';
+              const selectedAlarm = ALARM_SOUND_OPTIONS.find((a) => a.id === currentAlarmId) || ALARM_SOUND_OPTIONS[0];
+              const alarmVol = typeof state.alarmVolume === 'number' ? state.alarmVolume : 1.0;
+
+              return (
+                <>
+                  {/* Alarm Dropdown Trigger */}
+                  <div className="relative flex-1 min-w-[220px]" ref={alarmDropdownRef}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isAlarmOpen) {
+                          handleStopAlarmPreview();
+                        }
+                        setIsAlarmOpen(!isAlarmOpen);
+                      }}
+                      className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-[#09090A] hover:bg-[#141416] border border-[#2A2A2C] hover:border-[#D4AF37]/50 rounded-xl text-xs transition-all cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        <span className="text-sm shrink-0">{selectedAlarm.icon}</span>
+                        <span className="truncate font-medium text-[#F2EFE9]">
+                          {selectedAlarm.name}
+                        </span>
+                      </div>
+                      <ChevronDown className={`w-3.5 h-3.5 text-[#D4AF37] shrink-0 transition-transform ${isAlarmOpen ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {/* Alarm Dropdown Menu */}
+                    {isAlarmOpen && (
+                      <div 
+                        onMouseLeave={handleStopAlarmPreview}
+                        className="absolute top-full left-0 right-0 mt-1.5 z-50 bg-[#121214] border border-[#2A2A2C] rounded-xl shadow-2xl p-1.5 flex flex-col gap-1 backdrop-blur-xl animate-fadeIn max-h-72 overflow-y-auto"
+                      >
+                        <div className="px-2 py-1 text-[10px] uppercase font-bold text-[#D4AF37]/80 tracking-wider border-b border-[#2A2A2C]/60 mb-0.5 flex justify-between items-center">
+                          <span>Chọn âm báo hết giờ</span>
+                          <span className="text-[9px] text-[#E0D8D0]/50 lowercase font-normal italic">
+                            🎧 rê chuột để nghe thử
+                          </span>
+                        </div>
+
+                        {ALARM_SOUND_OPTIONS.map((opt) => {
+                          const isSelected = (state.alarmSoundId || 'airport') === opt.id;
+                          const isPreviewing = previewAlarmId === opt.id;
+                          return (
+                            <div
+                              key={opt.id}
+                              onMouseEnter={() => handlePreviewAlarm(opt.id)}
+                              onClick={() => handleSelectAlarm(opt.id)}
+                              className={`flex items-center justify-between p-2 rounded-lg text-xs transition-all cursor-pointer ${
+                                isSelected
+                                  ? 'bg-[#D4AF37]/15 text-[#D4AF37] border border-[#D4AF37]/30'
+                                  : isPreviewing
+                                  ? 'bg-[#222228] text-white border border-[#2A2A2C]'
+                                  : 'hover:bg-[#1C1C20] text-[#E0D8D0]/80'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 truncate">
+                                <span className="text-sm shrink-0">{opt.icon}</span>
+                                <span className="font-semibold truncate">{opt.name}</span>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                                {isPreviewing && (
+                                  <span className="text-[9px] bg-[#D4AF37]/20 text-[#D4AF37] px-1.5 py-0.5 rounded font-mono font-semibold animate-pulse">
+                                    Nghe thử 🎧
+                                  </span>
+                                )}
+                                {isSelected && (
+                                  <span className="text-[9px] bg-[#D4AF37] text-[#0D0D0E] font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                    <Check className="w-2.5 h-2.5" />
+                                    Đã chọn
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Volume Slider Inline (Bố cục đồng bộ với phần Nhạc nền) */}
+                  <div className="flex items-center gap-2 bg-[#09090A] border border-[#2A2A2C] rounded-xl px-2.5 py-1.5 shrink-0">
+                    {alarmVol === 0 ? (
+                      <VolumeX className="w-3.5 h-3.5 text-[#E0D8D0]/40" />
+                    ) : (
+                      <Volume2 className="w-3.5 h-3.5 text-[#E0D8D0]/60" />
+                    )}
+                    <input
+                      type="range"
+                      min="0"
+                      max="1.5"
+                      step="0.05"
+                      value={alarmVol}
+                      onChange={(e) => handleAlarmVolumeChange(parseFloat(e.target.value))}
+                      className="w-18 h-[3px] bg-[#2A2A2C] rounded-lg appearance-none cursor-pointer accent-[#D4AF37]"
+                      title={`Âm lượng chuông báo: ${Math.round(alarmVol * 100)}%`}
+                    />
+                    <span className="font-mono text-[10px] text-[#E0D8D0]/50 w-6 text-right">
+                      {Math.round(alarmVol * 100)}%
+                    </span>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+
+        {/* 4. TÙY CHỌN TRÌNH CHIẾU & GIAO DIỆN */}
         <div className="bg-[#1A1A1C] border border-[#2A2A2C] rounded-2xl p-4 shadow-xl flex items-center justify-between gap-4 flex-wrap sm:flex-nowrap">
           {/* Theme Colors selection */}
           <div className="flex items-center gap-3">

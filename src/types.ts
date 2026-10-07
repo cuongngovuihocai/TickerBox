@@ -13,6 +13,8 @@ export interface TimerState {
   musicVolume: number;
   musicPlaying: boolean;
   currentPresetId: string | null;
+  alarmSoundId: string;
+  alarmVolume: number;
 }
 
 export interface Preset {
